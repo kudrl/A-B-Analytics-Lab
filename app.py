@@ -16,7 +16,7 @@ from src.analysis import (
     generate_verdict,
 )
 from src.sql_trace import built_in_queries, run_sql
-from src.io import df_to_csv_bytes, obj_to_json_bytes, make_zip_bytes
+from src.reporting import make_export_bundle
 
 
 st.set_page_config(page_title="A/B Analytics Lab", layout="wide")
@@ -228,7 +228,11 @@ with tab_sql:
     st.subheader("SQL Trace (DuckDB over current events table)")
     st.caption("Table name: events")
 
-    presets = built_in_queries(pay_event=pay_event)
+    try:
+        presets = built_in_queries(pay_event=pay_event)
+    except ValueError as e:
+        st.error(str(e))
+        st.stop()
     preset_name = st.selectbox("Preset", list(presets.keys()), index=0)
     sql_text = st.text_area("SQL", value=presets[preset_name], height=180)
 
@@ -248,71 +252,22 @@ with tab_dl:
     st.subheader("Export results")
     st.caption("Download raw + computed tables to re-check everything outside the app.")
 
-    files: dict[str, bytes] = {
-        "events.csv": df_to_csv_bytes(df),
-        "users.csv": df_to_csv_bytes(users),
-        "kpi.csv": df_to_csv_bytes(kpis),
-    }
-
-    if funnel_by_variant is not None and len(funnel_by_variant) > 0:
-        files["funnel.csv"] = df_to_csv_bytes(funnel_by_variant)
-
-    if ret_df is not None and len(ret_df) > 0:
-        files["retention.csv"] = df_to_csv_bytes(ret_df)
-
-    stats_payload = {
-        "pay_event": pay_event,
-        "srm": {"ok": bool(srm.ok), "p_value": float(srm.p_value), "observed": dict(srm.observed)},
-        "conversion": {
-            "p_value": float(conv_test.p_value),
-            "conv_a": float(conv_test.conv_a),
-            "conv_b": float(conv_test.conv_b),
-            "abs_diff": float(conv_test.abs_diff),
-            "rel_lift": float(conv_test.rel_lift),
-            "ci95_abs": [float(conv_test.ci95_abs[0]), float(conv_test.ci95_abs[1])],
-        },
-        "arpu_bootstrap": {
-            "diff_mean": float(arpu_boot.diff_mean),
-            "ci95": [float(arpu_boot.ci95[0]), float(arpu_boot.ci95[1])],
-            "p_value_two_sided": float(arpu_boot.p_value_two_sided),
-            "n_boot": int(arpu_boot.n_boot),
-        },
-    }
-    files["stats.json"] = obj_to_json_bytes(stats_payload)
-
-    run_meta = {"source": source, "pay_event": pay_event}
-    if source == "Generate synthetic":
-        run_meta.update(
-            {
-                "scenario": scenario,
-                "n_users": int(n_users) if n_users is not None else None,
-                "seed": int(seed) if seed is not None else None,
-            }
-        )
-    files["run_meta.json"] = obj_to_json_bytes(run_meta)
-
-    report_md = "\n".join(
-        [
-            "# A/B Analytics Lab — Exported Report",
-            "",
-            f"**Pay event:** `{pay_event}`",
-            "",
-            "## Auto conclusion",
-            "",
-            verdict.body.strip(),
-            "",
-            "## Included files",
-            "- events.csv: raw events (event-level)",
-            "- users.csv: user-level aggregation used for KPIs/tests",
-            "- kpi.csv: KPI summary by variant",
-            "- funnel.csv: funnel (if computed)",
-            "- retention.csv: retention curve (if computed)",
-            "- stats.json: SRM + conversion test + ARPU bootstrap",
-            "- run_meta.json: run parameters for reproducibility",
-            "",
-        ]
+    files = make_export_bundle(
+        df=df,
+        users=users,
+        kpis=kpis,
+        srm=srm,
+        conv_test=conv_test,
+        arpu_boot=arpu_boot,
+        verdict=verdict,
+        pay_event=pay_event,
+        source=source,
+        scenario=scenario,
+        n_users=int(n_users) if n_users is not None else None,
+        seed=int(seed) if seed is not None else None,
+        funnel_by_variant=funnel_by_variant,
+        ret_df=ret_df,
     )
-    files["report.md"] = report_md.encode("utf-8")
 
     st.markdown("### Download individual files")
 
@@ -335,10 +290,9 @@ with tab_dl:
     st.divider()
     st.markdown("### Download everything as one archive")
 
-    zip_bytes = make_zip_bytes(files)
     st.download_button(
         "⬇️ ab_results.zip",
-        data=zip_bytes,
+        data=files["ab_results.zip"],
         file_name="ab_results.zip",
         mime="application/zip",
     )

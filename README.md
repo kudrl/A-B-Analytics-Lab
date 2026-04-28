@@ -1,41 +1,55 @@
-# ab_lab
-# 🧪 A/B Analytics Lab
-Мой Pet-проект для автоматизации анализа A/B тестов.
-**Цель:** собрать удобный веб-лаб для быстрой проверки гипотез. Скачивать ничего не нужно: ссылка на деплой на Streamlit: https://ablabb.streamlit.app/ Там же есть наборы тестовых данных (ниже)
+# A/B Analytics Lab
 
-## 📂 Входные данные
+Educational / portfolio project for reproducible A/B test analysis.
 
-Приложение принимает на вход **CSV-файл** (если не дать, генерирует собственный: логика в generator.py, поддерживает несколько видов генерации)
-Минимальная схема данных:
+A Streamlit app for loading event-level experiment data, calculating core A/B metrics, running basic statistical checks, inspecting a DuckDB SQL trace, and exporting reproducible reports.
 
-| Поле | Тип | Описание |
-| :--- | :--- | :--- |
-| `user_id` | str/int | Уникальный идентификатор пользователя |
-| `variant` | str | Группа теста (`A` — контроль, `B` — тест) |
-| `ts` | datetime | Время события |
-| `event` | str | Тип действия (напр. `signup`, `pay`) |
-| `amount` | float | Выручка (для событий оплаты). Если пусто — 0. |
+## Features
 
+- CSV upload / synthetic data
+- SRM check
+- CR / ARPU / retention / funnel
+- z-test for conversion
+- bootstrap CI for ARPU
+- DuckDB SQL trace
+- export report
 
+## Input schema
 
-## 🧠 Логика и Математика
+Required columns:
 
-Вся аналитическая логика реализована в `src/analysis.py`.
+| Column | Type | Description |
+| --- | --- | --- |
+| `user_id` | string / integer | User identifier |
+| `variant` | string | Experiment group: `A` or `B` |
+| `ts` | datetime | Event timestamp |
+| `event` | string | Event name, for example `signup`, `open_app`, `pay` |
 
-### 1. Препроцессинг и Метрики
-   *   $CR = \frac{\text{Users with payment}}{\text{Total Users}}$
-   *   $ARPU = \frac{\sum \text{Revenue}}{\text{Total Users}}$
+Optional columns:
 
-### 2. Проверка сплитования (SRM)
-Перед анализом метрик проверяется, не сломана ли система распределения трафика.
-$$ \chi^2 = \sum \frac{(Observed - Expected)^2}{Expected} $$
-*Если $p < 0.01$, приложение выдаст предупреждение, что данным верить нельзя.*
+| Column | Type | Description |
+| --- | --- | --- |
+| `amount` | number | Revenue amount for payment events. Missing values are treated as `0`. |
 
-### 3. Z-Test (для Конверсии)
+## How to run
 
-$$ Z = \frac{p_B - p_A}{\sqrt{P_{pool}(1-P_{pool})(\frac{1}{n_A} + \frac{1}{n_B})}} $$
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
 
-Где $P_{pool}$ — общаяконверсия по обеим группам.
+## Example
 
-### 4. Bootstrap (для ARPU)
-Так как чеки обычно имеют логнормальное распределение (тяжелые хвосты) и выбросы, T-тест Стьюдента может давать некорректные результаты.
+1. Start the app.
+2. Use synthetic data or upload a CSV with the schema above.
+3. Choose the payment event name.
+4. Review KPIs, SRM, conversion test, ARPU bootstrap, retention, and funnel.
+5. Export individual files or `ab_results.zip`.
+
+## Limitations
+
+- only two variants A/B
+- bootstrap p-value is approximate
+- funnel is event-order based
+- no sequential testing correction
+- no CUPED / stratification yet

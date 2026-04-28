@@ -49,6 +49,12 @@ def _ensure_ts_and_date(df: pd.DataFrame) -> pd.DataFrame:
 def build_user_table(df: pd.DataFrame, pay_event: str = "pay") -> pd.DataFrame:
 
     d = _ensure_ts_and_date(df)
+    normalized_variant = d["variant"].astype(str).str.upper().str.strip()
+    bad_users = normalized_variant.groupby(d["user_id"]).nunique()
+
+    if (bad_users > 1).any():
+        n_bad = int((bad_users > 1).sum())
+        raise ValueError(f"{n_bad} users appear in more than one variant")
 
     if (d["event"] == "signup").any():
         signup_ts = d.loc[d["event"] == "signup"].groupby("user_id")["ts"].min()
@@ -59,7 +65,7 @@ def build_user_table(df: pd.DataFrame, pay_event: str = "pay") -> pd.DataFrame:
     revenue = d.loc[pay_mask].groupby("user_id")["amount"].sum() if "amount" in d.columns else pd.Series(dtype=float)
     first_pay_ts = d.loc[pay_mask].groupby("user_id")["ts"].min() if pay_mask.any() else pd.Series(dtype="datetime64[ns]")
 
-    variant = d.groupby("user_id")["variant"].agg(lambda x: str(x.iloc[0]).upper().strip())
+    variant = normalized_variant.groupby(d["user_id"]).first()
 
     users = pd.DataFrame({"user_id": variant.index, "variant": variant.values})
     users["signup_ts"] = users["user_id"].map(signup_ts)
@@ -82,7 +88,7 @@ def compute_basic_kpis(users: pd.DataFrame) -> pd.DataFrame:
     return g.reset_index()
 
 
-def compute_funnel(df: pd.DataFrame, steps: List[str]) -> FunnelResult:
+def compute_unordered_funnel(df: pd.DataFrame, steps: List[str]) -> FunnelResult:
     d = _ensure_ts_and_date(df)
     variants = ["A", "B"]
     rows = []
@@ -109,6 +115,65 @@ def compute_funnel(df: pd.DataFrame, steps: List[str]) -> FunnelResult:
 
     out = pd.DataFrame(rows)
     return FunnelResult(steps=steps, by_variant=out)
+
+
+def compute_ordered_funnel(df: pd.DataFrame, steps: List[str]) -> FunnelResult:
+    d = _ensure_ts_and_date(df)
+    d["variant"] = d["variant"].astype(str).str.upper().str.strip()
+    variants = ["A", "B"]
+    rows = []
+
+    if not steps:
+        return FunnelResult(steps=steps, by_variant=pd.DataFrame(rows))
+
+    event_ts = (
+        d[d["event"].isin(steps)]
+        .groupby(["variant", "user_id", "event"])["ts"]
+        .min()
+        .unstack("event")
+    )
+
+    for v in variants:
+        if v in event_ts.index.get_level_values("variant"):
+            dv = event_ts.loc[v]
+        else:
+            dv = pd.DataFrame(columns=steps)
+
+        prev: Optional[int] = None
+        base = 0
+
+        for idx, step in enumerate(steps):
+            reached = pd.Series(True, index=dv.index)
+            previous_ts = None
+
+            for prev_step in steps[: idx + 1]:
+                if prev_step not in dv.columns:
+                    reached = pd.Series(False, index=dv.index)
+                    break
+
+                current_ts = dv[prev_step]
+                reached &= current_ts.notna()
+                if previous_ts is not None:
+                    reached &= current_ts >= previous_ts
+                previous_ts = current_ts
+
+            cnt = int(reached.sum())
+            if idx == 0:
+                base = cnt
+
+            step_conv = (cnt / prev) if (prev and prev > 0) else (1.0 if prev is None else 0.0)
+            overall = (cnt / base) if base > 0 else 0.0
+            rows.append(
+                {"variant": v, "step": step, "users_reached": cnt, "step_conv": step_conv, "overall_conv": overall}
+            )
+            prev = cnt
+
+    out = pd.DataFrame(rows)
+    return FunnelResult(steps=steps, by_variant=out)
+
+
+def compute_funnel(df: pd.DataFrame, steps: List[str]) -> FunnelResult:
+    return compute_ordered_funnel(df, steps)
 
 
 def compute_retention_curve(
@@ -207,6 +272,16 @@ def conversion_ztest_with_ci(users: pd.DataFrame) -> ConversionTestResult:
 
     p1, p2 = cA / nA if nA else 0, cB / nB if nB else 0
     diff = p2 - p1
+
+    if nA == 0 or nB == 0:
+        return ConversionTestResult(
+            p_value=1.0,
+            conv_a=float(p1),
+            conv_b=float(p2),
+            abs_diff=float(diff),
+            rel_lift=0.0,
+            ci95_abs=(float("nan"), float("nan")),
+        )
     
     p_pool = (cA + cB) / (nA + nB) if (nA + nB) else 0
     if p_pool == 0 or p_pool == 1 or (nA + nB) == 0:
