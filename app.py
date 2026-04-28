@@ -28,7 +28,7 @@ st.title("A/B Analytics Lab")
 
 
 # -----------------------------
-# Source
+# источники
 # -----------------------------
 st.sidebar.header("Data")
 
@@ -147,7 +147,7 @@ ret_df = None
 
 
 # -----------------------------
-# Tabs
+# вкладки
 # -----------------------------
 tab_metrics, tab_stats, tab_conc, tab_sql, tab_dl = st.tabs(
     ["Metrics", "Stats", "Conclusion", "SQL Trace", "Downloads"]

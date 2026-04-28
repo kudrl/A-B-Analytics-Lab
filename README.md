@@ -1,55 +1,32 @@
 # A/B Analytics Lab
 
-Educational / portfolio project for reproducible A/B test analysis.
+Учебный портфолио-проект для воспроизводимого анализа AB-тестов.
 
-A Streamlit app for loading event-level experiment data, calculating core A/B metrics, running basic statistical checks, inspecting a DuckDB SQL trace, and exporting reproducible reports.
+Streamlit-приложение для загрузки событийных данных эксперимента, расчёта основных A/B-метрик, базовых статистических проверок, просмотра DuckDB SQL и экспорта воспроизводимых отчётов.
 
-## Features
+## Возможности
 
-- CSV upload / synthetic data
-- SRM check
-- CR / ARPU / retention / funnel
-- z-test for conversion
-- bootstrap CI for ARPU
-- DuckDB SQL trace
-- export report
+- загрузка CSV / генерация синтетических данных
+- проверка SRM
+- расчёт CR / ARPU / retention / funnel
+- z-test для конверсии
+- bootstrap CI для ARPU
+- DuckDB SQL для ручного дописыванияSQL-запросов
+- экспорт отчёта
 
-## Input schema
+## Схема входных данных
 
-Required columns:
+Обязательные колонки:
 
-| Column | Type | Description |
+| Колонка | Тип | Описание |
 | --- | --- | --- |
-| `user_id` | string / integer | User identifier |
-| `variant` | string | Experiment group: `A` or `B` |
-| `ts` | datetime | Event timestamp |
-| `event` | string | Event name, for example `signup`, `open_app`, `pay` |
+| `user_id` | string / integer | Идентификатор пользователя |
+| `variant` | string | Группа эксперимента: `A` или `B` |
+| `ts` | datetime | Время события |
+| `event` | string | Название события, например `signup`, `open_app`, `pay` |
 
-Optional columns:
+Необязательные колонки:
 
-| Column | Type | Description |
+| Колонка | Тип | Описание |
 | --- | --- | --- |
-| `amount` | number | Revenue amount for payment events. Missing values are treated as `0`. |
-
-## How to run
-
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-## Example
-
-1. Start the app.
-2. Use synthetic data or upload a CSV with the schema above.
-3. Choose the payment event name.
-4. Review KPIs, SRM, conversion test, ARPU bootstrap, retention, and funnel.
-5. Export individual files or `ab_results.zip`.
-
-## Limitations
-
-- only two variants A/B
-- bootstrap p-value is approximate
-- funnel is event-order based
-- no sequential testing correction
-- no CUPED / stratification yet
+| `amount` | number | Выручка для событий оплаты. Пропущенные значения считаются равными `0`. |
