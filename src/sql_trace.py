@@ -7,6 +7,27 @@ import re
 import pandas as pd
 
 
+SQL_FORBIDDEN_PATTERNS = (
+    "attach",
+    "copy",
+    "create",
+    "delete",
+    "drop",
+    "export",
+    "insert",
+    "install",
+    "load",
+    "merge",
+    "pragma",
+    "read_csv",
+    "read_csv_auto",
+    "read_parquet",
+    "replace",
+    "update",
+)
+SQL_RESULT_LIMIT = 1_000
+
+
 @dataclass(frozen=True)
 class SQLResult:
     sql: str
@@ -16,9 +37,10 @@ class SQLResult:
 def run_sql(events: pd.DataFrame, sql: str) -> pd.DataFrame:
     import duckdb
 
+    safe_sql = validate_select_query(sql)
     con = duckdb.connect(database=":memory:")
     con.register("events", events)
-    return con.execute(sql).df()
+    return con.execute(safe_sql).df()
 
 
 def validate_event_name(event: str) -> str:
@@ -26,6 +48,23 @@ def validate_event_name(event: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9_\-]+", event):
         raise ValueError("event name must contain only letters, digits, '_' or '-'")
     return event
+
+
+def validate_select_query(sql: str) -> str:
+    query = str(sql).strip()
+    normalized = query.lower()
+
+    if not normalized:
+        raise ValueError("query must not be empty")
+    if ";" in query.rstrip(";"):
+        raise ValueError("only a single SELECT statement is allowed")
+    if not normalized.startswith("select") and not normalized.startswith("with"):
+        raise ValueError("only SELECT queries are allowed")
+    if any(re.search(rf"\b{pattern}\b", normalized) for pattern in SQL_FORBIDDEN_PATTERNS):
+        raise ValueError("query contains a forbidden SQL operation")
+    if re.search(r"\blimit\b", normalized):
+        return query
+    return f"{query.rstrip(';')} LIMIT {SQL_RESULT_LIMIT}"
 
 
 def built_in_queries(pay_event: str = "pay") -> Dict[str, str]:

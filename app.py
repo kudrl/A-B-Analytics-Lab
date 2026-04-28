@@ -15,8 +15,12 @@ from src.analysis import (
     arpu_bootstrap,
     generate_verdict,
 )
-from src.sql_trace import built_in_queries, run_sql
+from src.sql_trace import built_in_queries, run_sql, validate_event_name
 from src.reporting import make_export_bundle
+
+
+MAX_SYNTHETIC_USERS = 100_000
+ARPU_BOOTSTRAP_SAMPLES = 1_000
 
 
 st.set_page_config(page_title="A/B Analytics Lab", layout="wide")
@@ -31,6 +35,11 @@ st.sidebar.header("Data")
 source = st.sidebar.selectbox("Source", ["Generate synthetic", "Upload CSV"], index=0)
 
 pay_event = st.sidebar.text_input("Pay event name", value="pay").strip() or "pay"
+try:
+    pay_event = validate_event_name(pay_event)
+except ValueError as error:
+    st.sidebar.error(str(error))
+    st.stop()
 
 df: pd.DataFrame | None = None
 scenario = None
@@ -45,7 +54,7 @@ if source == "Generate synthetic":
         ["Conversion lift", "ARPU trade-off", "Simpson paradox"],
         index=0,
     )
-    n_users = st.sidebar.slider("n_users", 500, 200_000, 20_000, step=500)
+    n_users = st.sidebar.slider("n_users", 500, MAX_SYNTHETIC_USERS, 20_000, step=500)
     seed = st.sidebar.number_input("seed", value=42, step=1)
 
     if scenario == "Conversion lift":
@@ -115,11 +124,16 @@ if df is None or len(df) == 0:
 # ядро вычислений
 # -----------------------------
 users = build_user_table(df, pay_event=pay_event)
+variants = set(users["variant"].unique())
+if variants != {"A", "B"}:
+    st.error("Data must contain both variants: A and B")
+    st.stop()
+
 kpis = compute_basic_kpis(users)
 
 srm = check_srm(users)
 conv_test = conversion_ztest_with_ci(users)
-arpu_boot = arpu_bootstrap(users)
+arpu_boot = arpu_bootstrap(users, n_boot=ARPU_BOOTSTRAP_SAMPLES)
 
 verdict = generate_verdict(
     kpis=kpis,
@@ -175,9 +189,9 @@ with tab_metrics:
     try:
         ret_df = compute_retention_curve(df, active_event=None, max_day=max_day)
         st.dataframe(ret_df, use_container_width=True)
-    except Exception as e:
+    except Exception:
         ret_df = None
-        st.error(f"Retention failed: {e}")
+        st.error("Retention calculation failed.")
 
 
 with tab_stats:
@@ -228,11 +242,7 @@ with tab_sql:
     st.subheader("SQL Trace (DuckDB over current events table)")
     st.caption("Table name: events")
 
-    try:
-        presets = built_in_queries(pay_event=pay_event)
-    except ValueError as e:
-        st.error(str(e))
-        st.stop()
+    presets = built_in_queries(pay_event=pay_event)
     preset_name = st.selectbox("Preset", list(presets.keys()), index=0)
     sql_text = st.text_area("SQL", value=presets[preset_name], height=180)
 
@@ -240,8 +250,8 @@ with tab_sql:
         try:
             out = run_sql(df, sql_text)
             st.dataframe(out, use_container_width=True)
-        except Exception as e:
-            st.error(f"SQL error: {e}")
+        except Exception:
+            st.error("SQL query failed. Check query syntax.")
 
     st.divider()
     st.subheader("Raw events preview")
