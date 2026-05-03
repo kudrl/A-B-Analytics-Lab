@@ -27,8 +27,8 @@ MAX_SYNTHETIC_USERS = 100_000
 ARPU_BOOTSTRAP_SAMPLES = 1_000
 
 
-st.set_page_config(page_title="A/B Analytics Lab", layout="wide")
-st.title("A/B Analytics Lab")
+st.set_page_config(page_title="Лаборатория A/B", layout="wide")
+st.title("Лаборатория A/B")
 
 
 APP_PASSWORD = os.getenv("ABL_APP_PASSWORD")
@@ -116,20 +116,20 @@ def _build_conclusion_rows(
     return pd.DataFrame(
         [
             {
-                "metric": "Conversion",
+                "метрика": "Конверсия",
                 "A": _format_pct(conv_a),
                 "B": _format_pct(conv_b),
-                "B - A": _format_pct(conv_test.abs_diff),
+                "B − A": _format_pct(conv_test.abs_diff),
                 "p-value": f"{conv_test.p_value:.4g}",
-                "95% CI": f"{_format_pct(conv_test.ci95_abs[0])} to {_format_pct(conv_test.ci95_abs[1])}",
+                "95% ДИ": f"{_format_pct(conv_test.ci95_abs[0])} … {_format_pct(conv_test.ci95_abs[1])}",
             },
             {
-                "metric": "ARPU",
+                "метрика": "ARPU",
                 "A": _format_money(arpu_a),
                 "B": _format_money(arpu_b),
-                "B - A": _format_money(arpu_b - arpu_a),
+                "B − A": _format_money(arpu_b - arpu_a),
                 "p-value": f"{arpu_boot.p_value_two_sided:.4g}",
-                "95% CI": f"{_format_money(arpu_boot.ci95[0])} to {_format_money(arpu_boot.ci95[1])}",
+                "95% ДИ": f"{_format_money(arpu_boot.ci95[0])} … {_format_money(arpu_boot.ci95[1])}",
             },
         ]
     )
@@ -144,25 +144,25 @@ def _decision_text(srm, conv_test, arpu_boot, kpis: pd.DataFrame) -> tuple[str, 
 
     if not srm.ok:
         return (
-            "Hold decision",
-            "Traffic split looks suspicious. Investigate SRM before trusting treatment effects.",
+            "Пауза",
+            "Распределение трафика выглядит подозрительно (SRM). Сначала разберите SRM, потом доверяйте эффектам.",
         )
     if arpu_ci_excludes_zero:
         if arpu_b > arpu_a:
-            return "Ship B", "ARPU is higher for B and the bootstrap interval excludes zero."
-        return "Do not ship B", "ARPU is lower for B and the bootstrap interval excludes zero."
+            return "Запускать B", "ARPU выше в B, и бутстрэп-интервал исключает ноль."
+        return "Не запускать B", "ARPU ниже в B, и бутстрэп-интервал исключает ноль."
     if conv_test.p_value < 0.05 and conv_b > conv_a:
-        return "Ship B with caution", "Conversion is higher for B, while ARPU is not conclusive."
+        return "Запускать B с осторожностью", "Конверсия выше в B, но ARPU пока неубедителен."
     if conv_test.p_value < 0.05 and conv_b < conv_a:
-        return "Do not ship B", "Conversion is lower for B with statistical evidence."
-    return "Keep testing", "No primary metric has enough evidence for a rollout decision."
+        return "Не запускать B", "Конверсия ниже в B со статистическим подтверждением."
+    return "Продолжать тест", "Недостаточно доказательств по ключевым метрикам для решения о запуске."
 
 
 def _source_sidebar() -> tuple[pd.DataFrame | None, str, str, str | None, int | None, int | None]:
-    st.sidebar.header("Data")
+    st.sidebar.header("Данные")
 
-    source = st.sidebar.selectbox("Source", ["Generate synthetic", "Upload CSV"], index=0)
-    pay_event = st.sidebar.text_input("Pay event name", value="pay").strip() or "pay"
+    source = st.sidebar.selectbox("Источник", ["Синтетика", "Загрузить CSV"], index=0)
+    pay_event = st.sidebar.text_input("Событие оплаты (pay)", value="pay").strip() or "pay"
     try:
         pay_event = validate_event_name(pay_event)
     except ValueError as error:
@@ -174,21 +174,48 @@ def _source_sidebar() -> tuple[pd.DataFrame | None, str, str, str | None, int | 
     seed = None
     events: pd.DataFrame | None = None
 
-    if source == "Generate synthetic":
-        st.sidebar.subheader("Synthetic settings")
+    if source == "Синтетика":
+        st.sidebar.subheader("Настройки синтетики")
+        with st.sidebar.expander("Что регулируют параметры?"):
+            st.caption(
+                "Синтетика генерирует события для двух вариантов (A и B). "
+                "Параметры ниже задают базовые вероятности/уровни для A и отличия для B."
+            )
         scenario = st.sidebar.selectbox(
-            "Scenario",
-            ["Conversion lift", "ARPU trade-off", "Simpson paradox"],
+            "Сценарий",
+            ["Рост конверсии", "Компромисс ARPU", "Парадокс Симпсона"],
             index=0,
         )
-        n_users = st.sidebar.slider("n_users", 500, MAX_SYNTHETIC_USERS, 20_000, step=500)
-        seed = st.sidebar.number_input("seed", value=42, step=1)
+        n_users = st.sidebar.slider("Пользователей", 500, MAX_SYNTHETIC_USERS, 20_000, step=500)
+        seed = st.sidebar.number_input("Seed", value=42, step=1)
 
-        if scenario == "Conversion lift":
-            base_conv = st.sidebar.slider("base_conv (A)", 0.001, 0.5, 0.10, step=0.001)
-            lift_rel = st.sidebar.slider("lift_rel (B vs A)", 0.0, 2.0, 0.15, step=0.01)
-            base_open = st.sidebar.slider("base_open (open_app prob)", 0.0, 1.0, 0.75, step=0.01)
-            max_days = st.sidebar.slider("max_days", 3, 60, 14, step=1)
+        if scenario == "Рост конверсии":
+            base_conv = st.sidebar.slider(
+                "Конверсия A",
+                0.001,
+                0.5,
+                0.10,
+                step=0.001,
+                help="Вероятность события оплаты (pay) для варианта A.",
+            )
+            lift_rel = st.sidebar.slider(
+                "Отн. рост B к A",
+                0.0,
+                2.0,
+                0.15,
+                step=0.01,
+                help="Относительное изменение конверсии B относительно A. Например 0.15 = +15% к конверсии A.",
+            )
+            st.sidebar.metric("Конверсия B (расчёт)", f"{(float(base_conv) * (1 + float(lift_rel))):.2%}")
+            base_open = st.sidebar.slider(
+                "Вероятность open_app",
+                0.0,
+                1.0,
+                0.75,
+                step=0.01,
+                help="Вероятность события open_app в выбранные дни активности.",
+            )
+            max_days = st.sidebar.slider("Горизонт (дни)", 3, 60, 14, step=1)
             events = generator.generate_conversion_lift(
                 n_users=int(n_users),
                 base_conv=float(base_conv),
@@ -197,12 +224,40 @@ def _source_sidebar() -> tuple[pd.DataFrame | None, str, str, str | None, int | 
                 max_days=int(max_days),
                 seed=int(seed),
             )
-        elif scenario == "ARPU trade-off":
-            conv_a = st.sidebar.slider("conv_a", 0.001, 0.5, 0.12, step=0.001)
-            conv_b = st.sidebar.slider("conv_b", 0.001, 0.5, 0.10, step=0.001)
-            amount_mean_a = st.sidebar.slider("amount_mean_a", 1.0, 6.0, 2.8, step=0.05)
-            amount_mean_b = st.sidebar.slider("amount_mean_b", 1.0, 6.0, 3.25, step=0.05)
-            max_days = st.sidebar.slider("max_days", 3, 60, 14, step=1)
+        elif scenario == "Компромисс ARPU":
+            conv_a = st.sidebar.slider(
+                "Конверсия A",
+                0.001,
+                0.5,
+                0.12,
+                step=0.001,
+                help="Вероятность события оплаты (pay) для варианта A.",
+            )
+            conv_b = st.sidebar.slider(
+                "Конверсия B",
+                0.001,
+                0.5,
+                0.10,
+                step=0.001,
+                help="Вероятность события оплаты (pay) для варианта B.",
+            )
+            amount_mean_a = st.sidebar.slider(
+                "Параметр mean чека (A)",
+                1.0,
+                6.0,
+                2.8,
+                step=0.05,
+                help="Параметр mean логнормального распределения суммы покупки для A (чем больше, тем выше чек).",
+            )
+            amount_mean_b = st.sidebar.slider(
+                "Параметр mean чека (B)",
+                1.0,
+                6.0,
+                3.25,
+                step=0.05,
+                help="Параметр mean логнормального распределения суммы покупки для B (чем больше, тем выше чек).",
+            )
+            max_days = st.sidebar.slider("Горизонт (дни)", 3, 60, 14, step=1)
             events = generator.generate_arpu_tradeoff(
                 n_users=int(n_users),
                 conv_a=float(conv_a),
@@ -219,12 +274,12 @@ def _source_sidebar() -> tuple[pd.DataFrame | None, str, str, str | None, int | 
             events = events.copy()
             events.loc[events["event"] == "pay", "event"] = pay_event
     else:
-        st.sidebar.subheader("Upload CSV")
+        st.sidebar.subheader("Загрузка CSV")
         uploaded = st.sidebar.file_uploader("events.csv", type=["csv"])
         if uploaded is not None:
             validation = load_and_validate_csv(uploaded)
             if not validation.ok:
-                st.error(validation.error or "CSV validation failed")
+                st.error(validation.error or "Ошибка валидации CSV")
                 st.stop()
             events = validation.df
 
@@ -232,32 +287,32 @@ def _source_sidebar() -> tuple[pd.DataFrame | None, str, str, str | None, int | 
 
 
 if APP_PASSWORD:
-    st.sidebar.header("Access")
+    st.sidebar.header("Доступ")
     st.session_state.setdefault("abl_authed", False)
     if not st.session_state["abl_authed"]:
-        password = st.sidebar.text_input("Password", type="password")
+        password = st.sidebar.text_input("Пароль", type="password")
         if password:
             if hmac.compare_digest(str(password), str(APP_PASSWORD)):
                 st.session_state["abl_authed"] = True
             else:
-                st.sidebar.error("Wrong password")
+                st.sidebar.error("Неверный пароль")
         st.stop()
 
 
 df, pay_event, source, scenario, n_users, seed = _source_sidebar()
 
 if df is None or len(df) == 0:
-    st.info("Load data in the sidebar to start.")
+    st.info("Загрузите данные в сайдбаре, чтобы начать.")
     st.stop()
 
 df_viz = _prepare_viz_frame(df)
 if df_viz.empty:
-    st.error("No valid timestamps found in the current data.")
+    st.error("В данных нет валидных временных меток.")
     st.stop()
 
 users = build_user_table(df, pay_event=pay_event)
 if set(users["variant"].unique()) != {"A", "B"}:
-    st.error("Data must contain both variants: A and B")
+    st.error("Данные должны содержать оба варианта: A и B.")
     st.stop()
 
 kpis = compute_basic_kpis(users)
@@ -269,15 +324,51 @@ verdict = generate_verdict(kpis=kpis, srm=srm, conv_test=conv_test, arpu_boot=ar
 funnel_by_variant = None
 ret_df = None
 
-tab_names = ["Dashboard", "Metrics", "Stats", "Conclusion"]
+tab_names = ["Дашборд", "Метрики", "Статистика"]
 if ENABLE_SQL:
-    tab_names.append("SQL Trace")
-tab_names.append("Downloads")
+    tab_names.append("SQL")
+tab_names.append("Загрузки")
 tabs = dict(zip(tab_names, st.tabs(tab_names)))
 
+def _render_conclusion_section(
+    *,
+    srm_result,
+    conv_result,
+    arpu_result,
+    kpis_for_window: pd.DataFrame,
+):
+    decision, explanation = _decision_text(srm_result, conv_result, arpu_result, kpis_for_window)
+    st.subheader("Итог и рекомендация")
 
-with tabs["Dashboard"]:
-    st.subheader("Experiment dashboard")
+    decision_cols = st.columns([1.2, 2])
+    with decision_cols[0]:
+        st.metric("Решение", decision)
+    with decision_cols[1]:
+        st.info(explanation)
+
+    st.dataframe(
+        _build_conclusion_rows(kpis_for_window, conv_result, arpu_result),
+        width="stretch",
+        hide_index=True,
+    )
+
+    st.divider()
+    st.subheader("Чек-лист перед раскаткой")
+    checklist = [
+        ("Распределение трафика (SRM)", "ОК" if srm_result.ok else "Проверить"),
+        ("Доказательства по конверсии", "ОК" if conv_result.p_value < 0.05 else "Неубедительно"),
+        (
+            "Доказательства по ARPU",
+            "ОК" if (arpu_result.ci95[0] > 0 or arpu_result.ci95[1] < 0) else "Неубедительно",
+        ),
+    ]
+    st.dataframe(pd.DataFrame(checklist, columns=["проверка", "статус"]), width="stretch", hide_index=True)
+
+
+with tabs["Дашборд"]:
+    st.subheader("Дашборд эксперимента")
+
+    mode = st.radio("Режим", ["Базовый", "По анкете"], horizontal=True)
 
     date_min = df_viz["date"].min().date()
     date_max = df_viz["date"].max().date()
@@ -289,38 +380,69 @@ with tabs["Dashboard"]:
 
     controls = st.columns([1.2, 1, 1, 1])
     with controls[0]:
+        view_options = [
+            "Обзор",
+            "Лента событий",
+            "Дневная конверсия",
+            "Выручка и ARPU",
+            "Воронка",
+            "Удержание",
+            "Качество данных",
+            "Итог",
+        ]
+        view_index = 0
+        if mode == "По анкете":
+            with st.expander("Анкета (помогает выбрать нужные выводы)"):
+                goal = st.selectbox(
+                    "Какие выводы хотите сделать?",
+                    [
+                        "Принять решение о запуске",
+                        "Оценить влияние на конверсию",
+                        "Оценить влияние на выручку/ARPU",
+                        "Понять воронку",
+                        "Оценить удержание",
+                        "Проверить качество данных",
+                        "Найти сегменты",
+                    ],
+                    index=0,
+                )
+                st.session_state["dashboard_goal_ru"] = goal
+
+            default_view = {
+                "Принять решение о запуске": "Итог",
+                "Оценить влияние на конверсию": "Дневная конверсия",
+                "Оценить влияние на выручку/ARPU": "Выручка и ARPU",
+                "Понять воронку": "Воронка",
+                "Оценить удержание": "Удержание",
+                "Проверить качество данных": "Качество данных",
+                "Найти сегменты": "Обзор",
+            }.get(goal, "Итог")
+            view_index = view_options.index(default_view)
+
         dashboard_goal = st.selectbox(
-            "View",
-            [
-                "Overview",
-                "Event timeline",
-                "Daily conversion",
-                "Revenue and ARPU",
-                "Funnel",
-                "Retention",
-                "Data quality",
-            ],
-            index=0,
+            "Раздел",
+            view_options,
+            index=view_index,
         )
     with controls[1]:
         selected_event = st.selectbox(
-            "Event",
+            "Событие",
             sorted(df_viz["event"].astype(str).unique().tolist()),
             index=0,
         )
     with controls[2]:
-        segment_col = st.selectbox("Segment", ["None"] + segment_candidates, index=0)
+        segment_col = st.selectbox("Сегмент", ["Нет"] + segment_candidates, index=0)
     with controls[3]:
-        max_rows = st.number_input("Rows", min_value=20, max_value=500, value=100, step=20)
+        max_rows = st.number_input("Строк", min_value=20, max_value=500, value=100, step=20)
 
     date_controls = st.columns(2)
     with date_controls[0]:
-        date_from = st.date_input("From", value=date_min, min_value=date_min, max_value=date_max)
+        date_from = st.date_input("С", value=date_min, min_value=date_min, max_value=date_max)
     with date_controls[1]:
-        date_to = st.date_input("To", value=date_max, min_value=date_min, max_value=date_max)
+        date_to = st.date_input("По", value=date_max, min_value=date_min, max_value=date_max)
 
     if date_from > date_to:
-        st.error("From date must be earlier than or equal to To date.")
+        st.error("Дата «С» должна быть не позже даты «По».")
         st.stop()
 
     df_window = df_viz[
@@ -328,11 +450,14 @@ with tabs["Dashboard"]:
     ].copy()
 
     if df_window.empty:
-        st.info("No events in the selected date window.")
+        st.info("В выбранном окне дат событий нет.")
         st.stop()
 
     users_window = build_user_table(df_window, pay_event=pay_event)
     kpis_window = compute_basic_kpis(users_window)
+    srm_window = check_srm(users_window)
+    conv_test_window = conversion_ztest_with_ci(users_window)
+    arpu_boot_window = arpu_bootstrap(users_window, n_boot=ARPU_BOOTSTRAP_SAMPLES)
 
     conv_a = _variant_metric(kpis_window, "A", "conversion")
     conv_b = _variant_metric(kpis_window, "B", "conversion")
@@ -340,12 +465,12 @@ with tabs["Dashboard"]:
     arpu_b = _variant_metric(kpis_window, "B", "arpu")
 
     summary_cols = st.columns(4)
-    summary_cols[0].metric("Users", f"{int(users_window['user_id'].nunique()):,}")
-    summary_cols[1].metric("Conversion B - A", _format_pct(conv_b - conv_a))
-    summary_cols[2].metric("ARPU B - A", _format_money(arpu_b - arpu_a))
-    summary_cols[3].metric("Events", f"{len(df_window):,}")
+    summary_cols[0].metric("Пользователи", f"{int(users_window['user_id'].nunique()):,}")
+    summary_cols[1].metric("Конверсия B − A", _format_pct(conv_b - conv_a))
+    summary_cols[2].metric("ARPU B − A", _format_money(arpu_b - arpu_a))
+    summary_cols[3].metric("События", f"{len(df_window):,}")
 
-    if dashboard_goal == "Overview":
+    if dashboard_goal == "Обзор":
         st.dataframe(kpis_window, width="stretch", hide_index=True)
         overview_chart = kpis_window.melt(
             id_vars="variant",
@@ -359,15 +484,15 @@ with tabs["Dashboard"]:
             y="value",
             color="variant",
             barmode="group",
-            title="Core metrics by variant",
+            title="Ключевые метрики по вариантам",
         )
         st.plotly_chart(fig, width="stretch")
 
-    elif dashboard_goal == "Event timeline":
+    elif dashboard_goal == "Лента событий":
         daily = _daily_event_counts(df_window)
         daily = daily.loc[daily["event"].astype(str) == str(selected_event)]
         if daily.empty:
-            st.info("No rows for the selected event.")
+            st.info("По выбранному событию строк нет.")
         else:
             fig = px.line(
                 daily,
@@ -375,12 +500,12 @@ with tabs["Dashboard"]:
                 y="events",
                 color="variant",
                 markers=True,
-                title=f"Daily {selected_event} events",
+                title=f"События {selected_event} по дням",
             )
             st.plotly_chart(fig, width="stretch")
             st.dataframe(daily.head(int(max_rows)), width="stretch", hide_index=True)
 
-    elif dashboard_goal == "Daily conversion":
+    elif dashboard_goal == "Дневная конверсия":
         active = _daily_active_users(df_window)
         payers = (
             df_window.loc[df_window["event"].astype(str) == str(pay_event)]
@@ -398,12 +523,12 @@ with tabs["Dashboard"]:
             y="conversion_proxy",
             color="variant",
             markers=True,
-            title="Daily payer / active user proxy",
+            title="Доля плательщиков среди активных (по дням)",
         )
         st.plotly_chart(fig, width="stretch")
         st.dataframe(daily.head(int(max_rows)), width="stretch", hide_index=True)
 
-    elif dashboard_goal == "Revenue and ARPU":
+    elif dashboard_goal == "Выручка и ARPU":
         active = _daily_active_users(df_window)
         revenue = _daily_revenue(df_window, pay_event)
         daily = active.merge(revenue, on=["date", "variant"], how="left").fillna({"revenue": 0.0})
@@ -413,22 +538,22 @@ with tabs["Dashboard"]:
         revenue_chart, arpu_chart = st.columns(2)
         with revenue_chart:
             st.plotly_chart(
-                px.line(daily, x="date", y="revenue", color="variant", markers=True, title="Revenue"),
+                px.line(daily, x="date", y="revenue", color="variant", markers=True, title="Выручка"),
                 width="stretch",
             )
         with arpu_chart:
             st.plotly_chart(
-                px.line(daily, x="date", y="arpu_proxy", color="variant", markers=True, title="ARPU proxy"),
+                px.line(daily, x="date", y="arpu_proxy", color="variant", markers=True, title="ARPU (прокси)"),
                 width="stretch",
             )
         st.dataframe(daily.head(int(max_rows)), width="stretch", hide_index=True)
 
-    elif dashboard_goal == "Funnel":
+    elif dashboard_goal == "Воронка":
         all_events = sorted(df_window["event"].astype(str).unique().tolist())
         default_steps = [step for step in ["signup", pay_event] if step in all_events]
-        steps = st.multiselect("Steps", options=all_events, default=default_steps, key="dashboard_funnel")
+        steps = st.multiselect("Шаги", options=all_events, default=default_steps, key="dashboard_funnel")
         if len(steps) < 2:
-            st.info("Select at least two ordered steps.")
+            st.info("Выберите минимум два шага.")
         else:
             funnel = compute_funnel(df_window, steps=steps).by_variant
             st.dataframe(funnel, width="stretch", hide_index=True)
@@ -438,37 +563,46 @@ with tabs["Dashboard"]:
                 y="users_reached",
                 color="variant",
                 barmode="group",
-                title="Users reached by funnel step",
+                title="Пользователи по шагам воронки",
             )
             st.plotly_chart(fig, width="stretch")
 
-    elif dashboard_goal == "Retention":
-        retention_day = st.slider("Max day", 7, 60, 14, key="dashboard_retention_day")
-        active_options = ["Any event"] + sorted(df_window["event"].astype(str).unique().tolist())
-        active_event = st.selectbox("Active event", active_options, index=0)
-        active_event_value = None if active_event == "Any event" else active_event
+    elif dashboard_goal == "Удержание":
+        retention_day = st.slider("Макс. день", 7, 60, 14, key="dashboard_retention_day")
+        active_options = ["Любое событие"] + sorted(df_window["event"].astype(str).unique().tolist())
+        active_event = st.selectbox("Активность по событию", active_options, index=0)
+        active_event_value = None if active_event == "Любое событие" else active_event
         retention = compute_retention_curve(df_window, active_event=active_event_value, max_day=retention_day)
-        fig = px.line(retention, x="day", y="retention", color="variant", markers=True, title="Retention")
+        fig = px.line(retention, x="day", y="retention", color="variant", markers=True, title="Удержание")
         st.plotly_chart(fig, width="stretch")
         st.dataframe(retention.head(int(max_rows)), width="stretch", hide_index=True)
 
-    else:
+    elif dashboard_goal == "Качество данных":
         quality_cols = st.columns(4)
-        quality_cols[0].metric("Rows", f"{len(df_window):,}")
-        quality_cols[1].metric("Users", f"{df_window['user_id'].nunique():,}")
-        quality_cols[2].metric("Events", f"{df_window['event'].nunique():,}")
-        quality_cols[3].metric("Missing amount", f"{int(df_window['amount'].isna().sum()):,}")
+        quality_cols[0].metric("Строк", f"{len(df_window):,}")
+        quality_cols[1].metric("Пользователей", f"{df_window['user_id'].nunique():,}")
+        quality_cols[2].metric("Событий", f"{df_window['event'].nunique():,}")
+        quality_cols[3].metric("Пустых amount", f"{int(df_window['amount'].isna().sum()):,}")
         top_events = df_window["event"].astype(str).value_counts().head(20).reset_index()
         top_events.columns = ["event", "rows"]
         st.dataframe(top_events, width="stretch", hide_index=True)
+    elif dashboard_goal == "Итог":
+        _render_conclusion_section(
+            srm_result=srm_window,
+            conv_result=conv_test_window,
+            arpu_result=arpu_boot_window,
+            kpis_for_window=kpis_window,
+        )
+    else:
+        st.info("Выберите раздел для отображения.")
 
-    if segment_col != "None":
+    if segment_col != "Нет":
         st.divider()
-        st.subheader("Segment cut")
+        st.subheader("Разрез по сегменту")
         user_segment = _stable_user_segment(df_window, segment_col)
         segmented_users = users_window.merge(user_segment, on="user_id", how="inner")
         if segmented_users.empty:
-            st.info("No stable user-level segment values found for the selected column.")
+            st.info("Для выбранного столбца нет стабильных значений сегмента на уровне пользователя.")
         else:
             segment_kpis = (
                 segmented_users.groupby([segment_col, "variant"], as_index=False)
@@ -486,47 +620,47 @@ with tabs["Dashboard"]:
                 y="conversion",
                 color="variant",
                 barmode="group",
-                title="Conversion by segment",
+                title="Конверсия по сегментам",
             )
             st.plotly_chart(fig, width="stretch")
 
 
-with tabs["Metrics"]:
-    st.subheader("User-level KPIs")
+with tabs["Метрики"]:
+    st.subheader("Метрики на уровне пользователя")
     st.dataframe(kpis, width="stretch", hide_index=True)
 
     st.divider()
-    st.subheader("Funnel")
+    st.subheader("Воронка")
     all_events = sorted(df["event"].astype(str).unique().tolist())
     default_steps = [step for step in ["signup", pay_event] if step in all_events]
-    steps = st.multiselect("Steps", options=all_events, default=default_steps, key="metrics_funnel")
+    steps = st.multiselect("Шаги", options=all_events, default=default_steps, key="metrics_funnel")
     if len(steps) >= 2:
         funnel_result = compute_funnel(df, steps=steps)
         funnel_by_variant = funnel_result.by_variant
         st.dataframe(funnel_by_variant, width="stretch", hide_index=True)
     else:
-        st.info("Select at least two ordered steps.")
+        st.info("Выберите минимум два шага.")
 
     st.divider()
-    st.subheader("Retention")
-    max_day = st.slider("Max day", 7, 60, 14, key="metrics_retention_day")
+    st.subheader("Удержание")
+    max_day = st.slider("Макс. день", 7, 60, 14, key="metrics_retention_day")
     try:
         ret_df = compute_retention_curve(df, active_event=None, max_day=max_day)
         st.dataframe(ret_df, width="stretch", hide_index=True)
     except Exception as error:
         ret_df = None
-        st.error(f"Retention calculation failed: {error}")
+        st.error(f"Ошибка расчёта удержания: {error}")
 
 
-with tabs["Stats"]:
-    st.subheader("SRM check")
+with tabs["Статистика"]:
+    st.subheader("Проверка SRM")
     srm_cols = st.columns(3)
-    srm_cols[0].metric("Status", "OK" if srm.ok else "Check")
+    srm_cols[0].metric("Статус", "ОК" if srm.ok else "Проверить")
     srm_cols[1].metric("p-value", f"{srm.p_value:.4g}")
-    srm_cols[2].metric("Split", f"A={srm.observed.get('A', 0):,} / B={srm.observed.get('B', 0):,}")
+    srm_cols[2].metric("Сплит", f"A={srm.observed.get('A', 0):,} / B={srm.observed.get('B', 0):,}")
 
     st.divider()
-    st.subheader("Conversion z-test")
+    st.subheader("z-test по конверсии")
     st.json(
         {
             "p_value": float(conv_test.p_value),
@@ -539,7 +673,7 @@ with tabs["Stats"]:
     )
 
     st.divider()
-    st.subheader("ARPU bootstrap")
+    st.subheader("Бутстрэп ARPU")
     st.json(
         {
             "diff_mean": float(arpu_boot.diff_mean),
@@ -550,54 +684,29 @@ with tabs["Stats"]:
     )
 
 
-with tabs["Conclusion"]:
-    decision, explanation = _decision_text(srm, conv_test, arpu_boot, kpis)
-    st.subheader("Conclusion")
-
-    decision_cols = st.columns([1.2, 2])
-    with decision_cols[0]:
-        st.metric("Decision", decision)
-    with decision_cols[1]:
-        st.info(explanation)
-
-    st.dataframe(_build_conclusion_rows(kpis, conv_test, arpu_boot), width="stretch", hide_index=True)
-
-    st.divider()
-    st.subheader("What to check before rollout")
-    checklist = [
-        ("Traffic split", "Pass" if srm.ok else "Needs investigation"),
-        ("Conversion evidence", "Pass" if conv_test.p_value < 0.05 else "Not conclusive"),
-        (
-            "ARPU evidence",
-            "Pass" if (arpu_boot.ci95[0] > 0 or arpu_boot.ci95[1] < 0) else "Not conclusive",
-        ),
-    ]
-    st.dataframe(pd.DataFrame(checklist, columns=["check", "status"]), width="stretch", hide_index=True)
-
-
 if ENABLE_SQL:
-    with tabs["SQL Trace"]:
-        st.subheader("SQL Trace")
-        st.caption("Table name: events. Only read-only SELECT/WITH queries are allowed.")
+    with tabs["SQL"]:
+        st.subheader("SQL")
+        st.caption("Таблица: events. Разрешены только запросы SELECT/WITH (read-only).")
         presets = built_in_queries(pay_event=pay_event)
-        preset_name = st.selectbox("Preset", list(presets.keys()), index=0)
+        preset_name = st.selectbox("Пресет", list(presets.keys()), index=0)
         sql_text = st.text_area("SQL", value=presets[preset_name], height=180)
 
-        if st.button("Run SQL", type="primary"):
+        if st.button("Выполнить SQL", type="primary"):
             try:
                 output = run_sql(df, sql_text)
                 st.dataframe(output, width="stretch", hide_index=True)
             except Exception as error:
-                st.error(f"SQL query failed: {error}")
+                st.error(f"Ошибка выполнения SQL: {error}")
 
         st.divider()
-        st.subheader("Raw events preview")
+        st.subheader("Превью сырых событий")
         st.dataframe(df.head(200), width="stretch", hide_index=True)
 
 
-with tabs["Downloads"]:
-    st.subheader("Export results")
-    st.caption("Download raw data, computed tables, metadata, and a markdown report.")
+with tabs["Загрузки"]:
+    st.subheader("Экспорт результатов")
+    st.caption("Скачайте сырые данные, расчётные таблицы, метаданные и markdown-отчёт.")
 
     files = make_export_bundle(
         df=df,
