@@ -183,7 +183,7 @@ def _source_sidebar() -> tuple[pd.DataFrame | None, str, str, str | None, int | 
             )
         scenario = st.sidebar.selectbox(
             "Сценарий",
-            ["Рост конверсии", "Компромисс ARPU", "Парадокс Симпсона"],
+            ["Рост конверсии", "Компромисс ARPU", "Парадокс Симпсона", "Воронка: падение на шаге"],
             index=0,
         )
         n_users = st.sidebar.slider("Пользователей", 500, MAX_SYNTHETIC_USERS, 20_000, step=500)
@@ -267,8 +267,78 @@ def _source_sidebar() -> tuple[pd.DataFrame | None, str, str, str | None, int | 
                 max_days=int(max_days),
                 seed=int(seed),
             )
-        else:
+        elif scenario == "Парадокс Симпсона":
             events = generator.generate_simpson_paradox(n_users=int(n_users), seed=int(seed))
+        else:
+            st.sidebar.caption("Задайте шаги и вероятности перехода между шагами для A, а для B — относительный lift.")
+            steps_raw = st.sidebar.text_input(
+                "Шаги воронки (через запятую)",
+                value="signup, view_product, add_to_cart, checkout, pay",
+            )
+            steps = [s.strip() for s in str(steps_raw).split(",") if s.strip()]
+            try:
+                steps = [validate_event_name(step) for step in steps]
+            except ValueError as error:
+                st.sidebar.error(str(error))
+                st.stop()
+
+            if len(steps) < 2:
+                st.sidebar.error("Нужно минимум 2 шага.")
+                st.stop()
+
+            drop_variant = st.sidebar.selectbox("Вариант падения", ["B", "A"], index=0)
+            drop_options = ["Нет"] + steps[1:]
+            drop_step_choice = st.sidebar.selectbox(
+                "Шаг падения",
+                drop_options,
+                index=1 if len(drop_options) > 1 else 0,
+            )
+            drop_step = None if drop_step_choice == "Нет" else drop_step_choice
+            drop_multiplier = st.sidebar.slider(
+                "Множитель конверсии на шаге",
+                0.0,
+                1.0,
+                0.70,
+                step=0.01,
+                help="0.70 означает -30% конверсии на выбранном шаге (только для выбранного варианта).",
+            )
+
+            st.sidebar.subheader("Переходы A и lift B")
+            step_conv_a = [1.0]
+            step_lift_rel_b = [0.0]
+            for idx, step in enumerate(steps[1:], start=1):
+                p_a = st.sidebar.slider(
+                    f"A: конверсия в {step}",
+                    0.0,
+                    1.0,
+                    0.60 if idx < len(steps) - 1 else 0.20,
+                    step=0.01,
+                    key=f"funnel_p_a_{idx}_{step}",
+                )
+                lift = st.sidebar.slider(
+                    f"B: lift к A в {step}",
+                    -0.90,
+                    2.00,
+                    0.10,
+                    step=0.01,
+                    key=f"funnel_lift_b_{idx}_{step}",
+                    help="0.10 = +10% к вероятности перехода A на этом шаге.",
+                )
+                step_conv_a.append(float(p_a))
+                step_lift_rel_b.append(float(lift))
+
+            max_days = st.sidebar.slider("Горизонт (дни)", 3, 60, 14, step=1, key="funnel_max_days")
+            events = generator.generate_funnel_drop(
+                n_users=int(n_users),
+                steps=steps,
+                step_conv_a=step_conv_a,
+                step_lift_rel_b=step_lift_rel_b,
+                drop_step=drop_step,
+                drop_multiplier=float(drop_multiplier),
+                drop_variant=str(drop_variant),
+                max_days=int(max_days),
+                seed=int(seed),
+            )
 
         if pay_event != "pay":
             events = events.copy()
@@ -557,15 +627,32 @@ with tabs["Дашборд"]:
         else:
             funnel = compute_funnel(df_window, steps=steps).by_variant
             st.dataframe(funnel, width="stretch", hide_index=True)
-            fig = px.bar(
-                funnel,
-                x="step",
-                y="users_reached",
-                color="variant",
-                barmode="group",
-                title="Пользователи по шагам воронки",
-            )
-            st.plotly_chart(fig, width="stretch")
+            charts = st.columns(2)
+            with charts[0]:
+                st.plotly_chart(
+                    px.funnel(
+                        funnel,
+                        x="users_reached",
+                        y="step",
+                        color="variant",
+                        category_orders={"step": list(reversed(steps))},
+                        title="Воронка (пользователи)",
+                    ),
+                    width="stretch",
+                )
+            with charts[1]:
+                st.plotly_chart(
+                    px.bar(
+                        funnel,
+                        x="step",
+                        y="users_reached",
+                        color="variant",
+                        barmode="group",
+                        category_orders={"step": steps},
+                        title="Пользователи по шагам (bar)",
+                    ),
+                    width="stretch",
+                )
 
     elif dashboard_goal == "Удержание":
         retention_day = st.slider("Макс. день", 7, 60, 14, key="dashboard_retention_day")
@@ -638,6 +725,17 @@ with tabs["Метрики"]:
         funnel_result = compute_funnel(df, steps=steps)
         funnel_by_variant = funnel_result.by_variant
         st.dataframe(funnel_by_variant, width="stretch", hide_index=True)
+        st.plotly_chart(
+            px.funnel(
+                funnel_by_variant,
+                x="users_reached",
+                y="step",
+                color="variant",
+                category_orders={"step": list(reversed(steps))},
+                title="Воронка (пользователи)",
+            ),
+            width="stretch",
+        )
     else:
         st.info("Выберите минимум два шага.")
 

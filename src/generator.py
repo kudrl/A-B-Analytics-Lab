@@ -99,3 +99,83 @@ def generate_simpson_paradox(
             rows.append([uid, v, _date(2), "pay", _lognorm_amount(rng), c])
 
     return pd.DataFrame(rows, columns=["user_id", "variant", "ts", "event", "amount", "country"])
+
+
+def generate_funnel_drop(
+    *,
+    n_users: int = 30000,
+    steps: list[str] | None = None,
+    step_conv_a: list[float] | None = None,
+    step_lift_rel_b: list[float] | None = None,
+    drop_step: str | None = None,
+    drop_multiplier: float = 1.0,
+    drop_variant: str = "B",
+    max_days: int = 14,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """
+    Генерирует многошаговую воронку с возможностью "уронить" конверсию
+    на одном из шагов для выбранного варианта.
+
+    - steps: упорядоченный список событий (например: signup, view, pay)
+    - step_conv_a: конверсия перехода на шаг i (i>=1) для A, относительно предыдущего шага
+      (для шага 0 значение игнорируется; шаг 0 считается достигнутым всеми пользователями)
+    - step_lift_rel_b: относительный lift B к A по каждому переходу (i>=1): 0.2 = +20%
+    - drop_step + drop_multiplier: дополнительный множитель к вероятности перехода на drop_step
+      (например 0.7 = -30%) для drop_variant (A или B)
+    """
+    if steps is None:
+        steps = ["signup", "view_product", "add_to_cart", "checkout", "pay"]
+    steps = [str(s).strip() for s in steps if str(s).strip()]
+    if len(steps) < 2:
+        raise ValueError("steps must contain at least 2 events")
+
+    n_steps = len(steps)
+    if step_conv_a is None:
+        step_conv_a = [1.0] + [0.6] * (n_steps - 2) + [0.2]
+    if step_lift_rel_b is None:
+        step_lift_rel_b = [0.0] * n_steps
+
+    if len(step_conv_a) != n_steps:
+        raise ValueError("step_conv_a must have same length as steps")
+    if len(step_lift_rel_b) != n_steps:
+        raise ValueError("step_lift_rel_b must have same length as steps")
+
+    if not (0.0 <= float(drop_multiplier) <= 1.0):
+        raise ValueError("drop_multiplier must be between 0 and 1")
+
+    drop_variant = str(drop_variant).upper().strip() or "B"
+    if drop_variant not in {"A", "B"}:
+        raise ValueError("drop_variant must be 'A' or 'B'")
+
+    rng = np.random.default_rng(seed)
+    variants = rng.choice(["A", "B"], size=int(n_users))
+
+    base_day = 1
+    step_days = np.linspace(base_day, max(base_day + 1, int(max_days)), num=n_steps).astype(int).tolist()
+
+    rows: list[list[object]] = []
+    for uid, v in enumerate(variants):
+        reached_prev = True
+        for idx, step in enumerate(steps):
+            if idx == 0:
+                reached = True
+            else:
+                p_a = float(step_conv_a[idx])
+                lift = float(step_lift_rel_b[idx]) if v == "B" else 0.0
+                p = p_a * (1.0 + lift)
+                if drop_step is not None and str(step) == str(drop_step).strip() and v == drop_variant:
+                    p *= float(drop_multiplier)
+                p = float(np.clip(p, 0.0, 1.0))
+                reached = reached_prev and (rng.random() < p)
+
+            if not reached:
+                break
+
+            amount = 0.0
+            if idx == (n_steps - 1) and str(step) in {"pay", "purchase"}:
+                amount = _lognorm_amount(rng)
+            rows.append([uid, v, _date(int(step_days[idx])), str(step), float(amount)])
+            reached_prev = reached
+
+    return pd.DataFrame(rows, columns=["user_id", "variant", "ts", "event", "amount"])
